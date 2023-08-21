@@ -1,0 +1,115 @@
+---
+title: 'AI Audit Mini Consulting Project'
+author: "Phillip Dong"
+output:
+  html_document:
+    highlight: pygments
+    theme: readable
+    toc: true
+    toc_depth: 2
+    toc_float: true
+---
+
+## Set-up 
+```{r setup, message = FALSE}
+# Load necessary libraries
+library(tidyverse)
+library(dplyr)
+```
+
+```{r}
+# Reading data into respective data frame for each phase
+phase_1.df <- read.csv("2022-phase1-new-grad-applicants.csv")
+phase_2.df <- read.csv("2022-phase2-new-grad-applicants.csv")
+phase_3.df <- read.csv("2022-phase3-new-grad-applicants.csv") 
+final_hires.df <- read.csv("2022-final-hires-newgrad.csv")
+
+# Phase 3 is untidy data, so transform into tidy data 
+phase_3.df <- phase_3.df %>%
+    pivot_longer(-applicant_id, 
+               names_to="applicant_id_unique", 
+               values_to="rating") %>% # Transform row data into column attribute data
+  pivot_wider(names_from=applicant_id, 
+              values_from=rating) %>%  # Create attribute columns 
+  separate(applicant_id_unique, 
+           sep=1, 
+           into=c("prefix","applicant_id")) %>% # Separate prefix from id 
+  subset(select=-prefix) %>% # Removing 
+  transform(applicant_id=as.integer(applicant_id)) # Convert id column from char to int
+
+# Seeing if ids from Phase 1 is in subsequent phases, indicating a pass or fail for said phase
+phase_1.df <- phase_1.df %>% 
+  mutate(phase_1=ifelse(phase_1.df$applicant_id %in% phase_2.df$applicant_id,"Pass","Fail")) %>% 
+  mutate(phase_2=ifelse(phase_1.df$applicant_id %in% phase_3.df$applicant_id,"Pass","Fail")) %>% 
+  mutate(phase_3=ifelse(phase_1.df$applicant_id %in% final_hires.df$applicant_id,"Pass","Fail"))
+
+# Join all dataframes together
+hires_info <- phase_1.df %>% 
+  left_join(phase_2.df, join_by(applicant_id, team_applied_for, cover_letter, cv, gpa, gender, extracurriculars, work_experience)) %>% 
+  left_join(phase_3.df, join_by(applicant_id)) %>% 
+  mutate_all(~replace_na(.,0)) # Fill NA's with 0
+```
+`r knitr::kable(head(hires_info, 10))`
+
+```{r}
+# Plot speaking skill grading against each gender
+hires_info %>% 
+  ggplot(aes(x=gender, y=speaking_skills, color=gender)) +
+  geom_boxplot() +
+  labs(
+    title = "AI Graded Speaking Skills Based on Gender",
+    x = "Gender",
+    y = "Speaking Skill Grade",
+    alt = "Box plot of speaking skill grades for each gender where the visual distribution for the speaking skill of a female, as graded by AI, is on average one grade lower than that of a male. (Link to data is not provided due to company ownership)" 
+  ) 
+```
+```{r}
+# Summarize speaking skill of each gender
+speak_sum <- hires_info %>% 
+  group_by(gender) %>%
+  summarise(
+    count = n(),
+    mean = mean(speaking_skills, na.rm = TRUE),
+    sd = sd(speaking_skills, na.rm = TRUE))
+
+speak_sum
+
+# Compute the analysis of variance for speaking_skills
+speak.aov <- aov(speaking_skills ~ gender, hires_info)
+
+# Summary of the analysis
+summary(speak.aov)
+
+# Comparison of group means
+TukeyHSD(speak.aov)
+```
+
+Prefer not to say group is very small with a population size of 11. Removing this group will not impact the data set significantly as the p-values from ANOVA are greater than 0.005, which supports the null hypothesis, indicating that there is no significant relationship between the respective Prefer not to say, and Man / and Prefer not to say, and Woman.
+
+```{r}
+# Remove prefer-not-to-say rows
+hires_info <- subset(hires_info, gender != "Prefer not to say")
+
+# Plot speaking skill grading against each gender
+hires_info %>% 
+  ggplot(aes(x=gender, y=speaking_skills, color=gender)) +
+  geom_boxplot() +
+  labs(
+    title = "AI Graded Speaking Skills Based on Gender",
+    x = "Gender",
+    y = "Speaking Skill Grade",
+    alt = "Box plot of speaking skill grades for each gender where the visual distribution for the speaking skill of a female, as graded by AI, is on average one grade lower than that of a male. (Link to data is not provided due to company ownership)" 
+  ) 
+
+# Compute the analysis of variance for speaking_skills
+speak.aov <- aov(speaking_skills ~ gender, hires_info)
+
+# Summary of the analysis
+summary(speak.aov)
+
+# Comparison of group means
+TukeyHSD(speak.aov)
+```
+From the statistical analysis of an applicant's speaking skill as graded by the AI when grouped by gender, we can conclude that the means of female and male speech grades significantly differ when compared to pairwise comparison between other groups - such as female vs undisclosed gender, or male vs undisclosed gender. Population size for females and males are similar but after post-hoc analysis with Tukey's test, we can see that on average, males are graded 0.911 points higher than females. For a given range, males are graded on average between 0.489 and 1.335 points than females. This is especially evident when addressing the graph, as we can observe that the upper quartile of speech grades for males is around 2 grades higher than the speech grades for females. The range of female grades are also around 3 grades lower than that of males. To the AI, males could appear to be more frequently eloquent due to preconceived data or because of a naturally deeper tone which is indicative of confidence. Therefore, it could be argued that the AI is being processed with biased training data.
+
+An underlying risk of algorithmic bias is always prevalent when gender is involved in training Artificial Intelligence. For instance, a lack of representation of diverse genders in the data collection process can exacerbate selection bias as the voices of non-binary, or transgender individuals may not be adequately considered in the training data, which may influence the decisions made by the AI when grading the speaking skill of the applicant There are 11 applicants in the population that have undisclosed gender, and the spread of data for this group is the largest for all the genders, which could signify under-training of the AI. Therefore, the consideration of realistic and inclusive data representation is of utmost importance especially when considering ethical and legal reasons.
